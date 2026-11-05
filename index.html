@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>好好睡</title>
+<meta name="theme-color" content="#0b1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="好好睡">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root { --bg:#0b1020; --card:#151b30; --card2:#1d2440; --text:#e6e9f2; --dim:#9aa3bd; --accent:#8fb4ff; --on:#3d5fae; --line:#2a3358; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif; }
+  body { padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 28px); max-width:560px; margin:0 auto; }
+  h1 { font-size:22px; font-weight:600; margin:4px 0 12px; color:var(--dim); text-align:center; letter-spacing:2px; }
+  h2 { font-size:15px; font-weight:600; color:var(--dim); margin:22px 0 10px; }
+  button { font:inherit; color:var(--text); background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:12px 10px; font-size:16px; cursor:pointer; }
+  button.sel { background:var(--on); border-color:var(--accent); }
+  .grid { display:grid; gap:8px; }
+  .g2 { grid-template-columns:1fr 1fr; } .g3 { grid-template-columns:repeat(3,1fr); }
+  #breath { position:relative; height:200px; display:flex; align-items:center; justify-content:center; }
+  #orb { width:110px; height:110px; border-radius:50%; background:radial-gradient(circle at 40% 35%, #a9c4ff, #3d5fae 70%); opacity:.55; transform:scale(.6); }
+  #breathText { position:absolute; font-size:20px; color:#fff; text-shadow:0 0 8px #000; }
+  #play { width:100%; font-size:22px; padding:18px; border-radius:16px; background:#2b4a8f; border-color:var(--accent); }
+  #play.playing { background:#3a2b4f; border-color:#b49cff; }
+  #status { text-align:center; color:var(--dim); min-height:22px; margin:10px 0 0; font-size:15px; }
+  .layer { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:10px; }
+  .layer .top { display:flex; align-items:center; gap:10px; }
+  .layer .name { flex:1; font-size:17px; }
+  .layer .desc { color:var(--dim); font-size:13px; margin:6px 0 0; line-height:1.5; }
+  .layer .tog { min-width:64px; }
+  .layer input[type=range] { width:100%; margin:12px 0 2px; accent-color:var(--accent); }
+  .layer .extra { margin-top:10px; }
+  .layer.off .desc, .layer.off input[type=range], .layer.off .extra { opacity:.4; }
+  input[type=number] { font:inherit; font-size:16px; width:100%; padding:11px; border-radius:12px; border:1px solid var(--line); background:#0f1428; color:var(--text); }
+  details { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; margin-top:12px; }
+  summary { font-size:16px; cursor:pointer; }
+  details p, details li { color:var(--dim); font-size:14px; line-height:1.7; }
+  details ul { padding-left:20px; margin:8px 0; }
+</style>
+</head>
+<body>
+  <h1>好好睡</h1>
+
+  <div id="breath"><div id="orb"></div><div id="breathText"></div></div>
+
+  <button id="play">開始播放</button>
+  <div id="status"></div>
+
+  <h2>情境（點一下套用）</h2>
+  <div class="grid g2" id="presets"></div>
+
+  <h2>定時關閉</h2>
+  <div class="grid g3" id="timers"></div>
+
+  <h2>聲音（可以疊加，各自調音量）</h2>
+  <div id="layers"></div>
+
+  <h2>播放方式</h2>
+  <div class="grid g2" id="modes"></div>
+  <p style="color:var(--dim);font-size:13px;line-height:1.6;margin:8px 2px 0">
+    「鎖屏也能播」比較穩，但每次調整要等 1～2 秒；如果鎖螢幕後聲音會停，就換另一種試試。
+  </p>
+
+  <details>
+    <summary>怎麼用比較有效</summary>
+    <ul>
+      <li>躺好後先選「慢呼吸＋海浪」：浪聲變大時慢慢吸氣，浪退時慢慢吐氣，一分鐘大約 6 次。跟著做 10～20 分鐘，腦袋比較不會一直轉。</li>
+      <li>音量開小一點，剛好聽得到就好；太大聲反而會干擾睡眠。</li>
+      <li>設定定時關閉，最後一分鐘會慢慢變小聲。</li>
+      <li>每天固定時間上床、睡前少看手機，效果會比只靠聲音好。</li>
+    </ul>
+  </details>
+  <details>
+    <summary>研究怎麼說</summary>
+    <ul>
+      <li>睡前聽慢節奏的柔和音樂：有系統性回顧支持能改善主觀睡眠品質（中等證據）。</li>
+      <li>睡前慢呼吸（每分鐘約 6 次）：幾個小型研究顯示入睡較快、半夜醒來較少。</li>
+      <li>粉紅噪音、雨聲：證據不一，主要好處是蓋過環境雜音。</li>
+      <li>雙耳節拍：對放鬆、焦慮有一些研究，對睡眠的證據較少；需要戴耳機。</li>
+      <li>432 Hz 等頻率：只有小型研究，證據很少。聽起來舒服就用，不舒服就不必勉強。</li>
+    </ul>
+  </details>
+  <details>
+    <summary>一點提醒</summary>
+    <p>這些聲音是幫忙放鬆的輔助。如果長時間睡不好、常常被想法困住或情緒很低落，找醫師或心理師聊聊會很有幫助，這不是小題大作。</p>
+  </details>
+
+<script src="app.js"></script>
+</body>
+</html>
