@@ -3,6 +3,7 @@
 
 const SR = 44100;
 const LOOP = 60;      // 「鎖屏也能播」模式：先合成 60 秒再循環播放
+const WARM = 2;       // 先讓濾波器穩定，再取循環音源
 const BREATH = 10;    // 一次呼吸 10 秒＝每分鐘 6 次
 const INHALE = 4;     // 吸 4 秒、吐 6 秒（吐氣較長比較放鬆）
 const NOISE_SEC = 20;
@@ -120,8 +121,11 @@ function envBuffer() {
 }
 
 // 柔和和弦：先離線合成 60 秒，之後循環播放
-async function padBuffer() {
-  if (cache.pad) return cache.pad;
+function padBuffer() {
+  return cache.padP ||= renderPad();
+}
+
+async function renderPad() {
   const oc = new OfflineAudioContext(2, 75 * SR, SR);
   const lp = oc.createBiquadFilter();
   lp.type = 'lowpass'; lp.frequency.value = 1400;
@@ -217,6 +221,9 @@ let loopUrl = null, fadeUrl = null, fading = false;
 let endAt = 0;          // 定時結束時間（毫秒），0＝整晚
 let tickTimer = null;
 let session = 0;        // 每次開始／停止加一，舊的非同步結果不會誤用
+let renderVer = 0;      // 同一輪設定變更時，只採用最新的合成結果
+let needTap = false;
+let lastT = 0;
 
 function wavBlob(buf) {
   const ch = buf.numberOfChannels, n = buf.length;
@@ -238,51 +245,107 @@ function wavBlob(buf) {
 const silentUrl = URL.createObjectURL(wavBlob(new AudioBuffer({ length: SR / 10, numberOfChannels: 1, sampleRate: SR })));
 
 async function renderMix(fade) {
-  await padBuffer();
-  const oc = new OfflineAudioContext(2, LOOP * SR, SR);
+  if (state.layers.pad.on) await padBuffer();
+  const oc = new OfflineAudioContext(2, (WARM + LOOP) * SR, SR);
   const g = build(oc, oc.destination, false);
-  if (fade) { g.master.gain.setValueAtTime(0.9, 0); g.master.gain.linearRampToValueAtTime(0, LOOP); }
-  return URL.createObjectURL(wavBlob(await oc.startRendering()));
+  if (fade) { g.master.gain.setValueAtTime(0.9, WARM); g.master.gain.linearRampToValueAtTime(0, WARM + LOOP); }
+  const full = await oc.startRendering();
+  const buf = new AudioBuffer({ length: LOOP * SR, numberOfChannels: 2, sampleRate: SR });
+  for (let c = 0; c < 2; c++) buf.copyToChannel(full.getChannelData(c).subarray(WARM * SR, (WARM + LOOP) * SR), c);
+  return URL.createObjectURL(wavBlob(buf));
 }
 
-function setAudio(url, at, loop) {
+async function playUrl(url, at, loop) {
+  const my = session, ver = renderVer;
   audio.loop = loop;
   audio.src = url;
   audio.currentTime = at;
-  audio.play().catch(() => {});
+  lastT = at;
+  try {
+    await audio.play();
+    if (my === session && ver === renderVer && audio.src === url) needTap = false;
+    return true;
+  } catch {
+    if (my === session && ver === renderVer && audio.src === url) needTap = true;
+    return false;
+  } finally {
+    if (my === session && ver === renderVer) renderPlay();
+  }
+}
+
+async function prepareCompat() {
+  const my = session, ver = ++renderVer;
+  try {
+    const url = await renderMix(false);
+    if (my !== session || ver !== renderVer || fading) { URL.revokeObjectURL(url); return; }
+    const at = loopUrl ? audio.currentTime % LOOP : 0;
+    if (loopUrl) URL.revokeObjectURL(loopUrl);
+    if (fadeUrl) URL.revokeObjectURL(fadeUrl);
+    loopUrl = url;
+    fadeUrl = null;
+    const ok = await playUrl(url, at, true);
+    if (my !== session || ver !== renderVer || fading) { URL.revokeObjectURL(url); return; }
+    if (ok && !endAt && state.timer) endAt = Date.now() + state.timer * 60_000;
+    renderPlay();
+    if (state.timer) {
+      const f = await renderMix(true);
+      if (my !== session || ver !== renderVer || fading) { URL.revokeObjectURL(f); return; }
+      fadeUrl = f;
+    }
+  } catch (e) {
+    if (my === session && ver === renderVer) fail(e);
+  }
+}
+
+async function resumeTap() {
+  const my = session, ver = renderVer;
+  try {
+    if (live) await live.ctx.resume();
+    else await audio.play();
+    if (my !== session || ver !== renderVer) return;
+    needTap = live ? live.ctx.state !== 'running' : false;
+    if (!live && loopUrl && !endAt && state.timer) endAt = Date.now() + state.timer * 60_000;
+  } catch {
+    if (my === session && ver === renderVer) needTap = true;
+  } finally {
+    if (my === session && ver === renderVer) renderPlay();
+  }
 }
 
 function start() {
   const my = ++session;
+  lastError = '';
+  needTap = false;
   playing = true;
   fading = false;
-  endAt = state.timer ? Date.now() + state.timer * 60_000 : 0;
+  endAt = 0;
   if (navigator.audioSession) navigator.audioSession.type = 'playback';
   if (state.mode === 'live') {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    ctx.resume();
+    ctx.resume().catch(() => {});
     padBuffer().then(() => {
       if (my !== session) { ctx.close(); return; }
       const graph = build(ctx, ctx.destination, true);
       const now = ctx.currentTime;
       graph.master.gain.setValueAtTime(0, now);
       graph.master.gain.linearRampToValueAtTime(0.9, now + 3);
+      endAt = state.timer ? Date.now() + state.timer * 60_000 : 0;
       if (endAt) {
         const end = now + state.timer * 60;
         graph.master.gain.setValueAtTime(0.9, end - FADE_SEC);
         graph.master.gain.linearRampToValueAtTime(0, end);
       }
       live = { ctx, graph, t0: now };
-    }).catch(showError);
+      needTap = ctx.state !== 'running';
+      renderPlay();
+    }).catch(e => {
+      ctx.close().catch(() => {});
+      if (my === session) fail(e);
+    });
   } else {
     // 先在使用者點擊的當下播一段靜音，iPhone 才允許之後自動接著播
-    setAudio(silentUrl, 0, true);
-    renderMix(false).then(url => {
-      if (my !== session) { URL.revokeObjectURL(url); return; }
-      loopUrl = url;
-      setAudio(url, 0, true);
-      if (endAt) renderMix(true).then(u => { if (my === session) fadeUrl = u; else URL.revokeObjectURL(u); }).catch(showError);
-    }).catch(showError);
+    playUrl(silentUrl, 0, true);
+    prepareCompat();
   }
   if ('mediaSession' in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({ title: '好好睡', artist: '睡前放鬆聲音' });
@@ -296,8 +359,13 @@ function start() {
 
 function stop() {
   session++;
+  renderVer++;
   playing = false;
+  needTap = false;
+  endAt = 0;
+  lastT = 0;
   clearInterval(tickTimer);
+  clearTimeout(rerenderTimer);
   if (live) { live.ctx.close(); live = null; }
   audio.pause();
   audio.removeAttribute('src');
@@ -309,12 +377,14 @@ function stop() {
 }
 
 function checkTimer() {
+  const t = audio.currentTime, wrapped = t < lastT;
+  lastT = t;
   if (!playing || !endAt) { renderPlay(); return; }
   const left = endAt - Date.now();
   if (left <= 0) { stop(); return; }
-  if (state.mode === 'compat' && !fading && fadeUrl && left <= FADE_SEC * 1000) {
+  if (state.mode === 'compat' && !fading && fadeUrl && wrapped && left <= 2 * LOOP * 1000) {
     fading = true;
-    setAudio(fadeUrl, Math.max(0, FADE_SEC - left / 1000), false);
+    playUrl(fadeUrl, 0, false);
   }
   renderPlay();
 }
@@ -336,21 +406,10 @@ function applyChange() {
     graph.nodes.beatOsc.frequency.setTargetAtTime(200 + state.beat, ctx.currentTime, 0.1);
   } else if (state.mode === 'compat' && !fading) {
     clearTimeout(rerenderTimer);
-    rerenderTimer = setTimeout(async () => {
-      const my = session;
-      const url = await renderMix(false);
-      if (my !== session || fading) { URL.revokeObjectURL(url); return; }
-      const at = audio.currentTime;
-      const old = loopUrl;
-      loopUrl = url;
-      setAudio(url, at % LOOP, true);
-      if (old) URL.revokeObjectURL(old);
-      if (endAt) {
-        const f = await renderMix(true);
-        if (my !== session) { URL.revokeObjectURL(f); return; }
-        if (fadeUrl) URL.revokeObjectURL(fadeUrl);
-        fadeUrl = f;
-      }
+    const my = session;
+    rerenderTimer = setTimeout(() => {
+      if (my !== session || fading) return;
+      prepareCompat();
     }, 700);
   }
 }
@@ -366,6 +425,11 @@ function el(tag, props = {}, ...kids) {
 
 // 出錯時直接顯示在畫面上，手機上才查得到原因
 let lastError = '';
+function fail(e) {
+  stop();
+  showError(e);
+}
+
 function showError(e) {
   lastError = (e && (e.message || e.reason?.message || e.reason)) || String(e);
   renderPlay();
@@ -374,12 +438,13 @@ window.addEventListener('error', showError);
 window.addEventListener('unhandledrejection', showError);
 
 function renderPlay() {
-  $('#play').textContent = playing ? '停止' : '開始播放';
+  $('#play').textContent = needTap ? '點這裡開始播放' : playing ? '停止' : '開始播放';
   $('#play').classList.toggle('playing', playing);
   let s = '';
   if (lastError) s = '出錯了：' + lastError;
+  else if (needTap) s = '手機擋下了播放，請再點一下上面的按鈕';
   else if (playing) {
-    if (state.mode === 'compat' && !loopUrl) s = '準備聲音中…';
+    if (state.mode === 'compat' ? !loopUrl : !live) s = '準備中…';
     else if (endAt) {
       const m = Math.max(0, Math.ceil((endAt - Date.now()) / 60000));
       s = `${m} 分鐘後自動關閉`;
@@ -480,7 +545,7 @@ function animate() {
   requestAnimationFrame(animate);
 }
 
-$('#play').onclick = () => (playing ? stop() : start());
+$('#play').onclick = () => (needTap ? resumeTap() : playing ? stop() : start());
 renderPresets();
 renderTimers();
 renderModes();
